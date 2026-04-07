@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -59,31 +60,58 @@ class TarantoolKvStorageIntegrationTest {
 
     @Test
     void shouldSupportPutGetNullDeleteRangeAndCount() {
-        storage.put("it_a", "A".getBytes(StandardCharsets.UTF_8));
-        storage.put("it_b", null);
-        storage.put("it_c", "C".getBytes(StandardCharsets.UTF_8));
+        String prefix = "it_basic_" + UUID.randomUUID() + "_";
+        String keyA = prefix + "a";
+        String keyB = prefix + "b";
+        String keyC = prefix + "c";
 
-        KvGetResult valueA = storage.get("it_a");
+        storage.put(keyA, "A".getBytes(StandardCharsets.UTF_8));
+        storage.put(keyB, null);
+        storage.put(keyC, "C".getBytes(StandardCharsets.UTF_8));
+
+        KvGetResult valueA = storage.get(keyA);
         assertTrue(valueA.found());
         assertArrayEquals("A".getBytes(StandardCharsets.UTF_8), valueA.value().get());
 
-        KvGetResult valueB = storage.get("it_b");
+        KvGetResult valueB = storage.get(keyB);
         assertTrue(valueB.found());
         assertTrue(valueB.value().isEmpty());
 
-        assertFalse(storage.get("it_missing").found());
+        assertFalse(storage.get(prefix + "missing").found());
 
         List<KvPair> rangeResults = new ArrayList<>();
-        storage.range("it_a", "it_c", rangeResults::add);
+        storage.range(keyA, keyC, rangeResults::add);
 
         assertEquals(3, rangeResults.size());
-        assertEquals("it_a", rangeResults.get(0).key());
-        assertEquals("it_b", rangeResults.get(1).key());
-        assertEquals("it_c", rangeResults.get(2).key());
+        assertEquals(keyA, rangeResults.get(0).key());
+        assertEquals(keyB, rangeResults.get(1).key());
+        assertEquals(keyC, rangeResults.get(2).key());
         assertNull(rangeResults.get(1).value());
 
         assertTrue(storage.count() >= 3);
-        assertTrue(storage.delete("it_b"));
-        assertFalse(storage.delete("it_b"));
+        assertTrue(storage.delete(keyB));
+        assertFalse(storage.delete(keyB));
+    }
+
+    @Test
+    void shouldPageRangeAcrossMultipleBatchesAndRespectUpperBound() {
+        String prefix = "it_page_" + UUID.randomUUID() + "_";
+        for (int i = 0; i < 10; i++) {
+            String key = prefix + String.format("%02d", i);
+            storage.put(key, ("v" + i).getBytes(StandardCharsets.UTF_8));
+        }
+
+        String from = prefix + "02";
+        String to = prefix + "08";
+
+        List<KvPair> rangeResults = new ArrayList<>();
+        storage.range(from, to, rangeResults::add);
+
+        assertEquals(7, rangeResults.size());
+        for (int i = 0; i < 7; i++) {
+            String expectedKey = prefix + String.format("%02d", i + 2);
+            assertEquals(expectedKey, rangeResults.get(i).key());
+            assertEquals("v" + (i + 2), new String(rangeResults.get(i).value(), StandardCharsets.UTF_8));
+        }
     }
 }
